@@ -30,11 +30,11 @@ const initTheme = () => {
     const isDark = savedTheme === 'dark' || (!savedTheme && systemPrefersDark);
     
     if (isDark) {
-        document.body.setAttribute('data-theme', 'dark');
+        document.documentElement.setAttribute('data-theme', 'dark');
         document.querySelector('.icon-moon').style.display = 'none';
         document.querySelector('.icon-sun').style.display = 'block';
     } else {
-        document.body.removeAttribute('data-theme');
+        document.documentElement.removeAttribute('data-theme');
         document.querySelector('.icon-moon').style.display = 'block';
         document.querySelector('.icon-sun').style.display = 'none';
     }
@@ -42,14 +42,14 @@ const initTheme = () => {
 initTheme();
 
 themeToggleBtn.addEventListener('click', () => {
-    const isDark = document.body.hasAttribute('data-theme');
+    const isDark = document.documentElement.hasAttribute('data-theme');
     if (isDark) {
-        document.body.removeAttribute('data-theme');
+        document.documentElement.removeAttribute('data-theme');
         localStorage.setItem('theme', 'light');
         document.querySelector('.icon-moon').style.display = 'block';
         document.querySelector('.icon-sun').style.display = 'none';
     } else {
-        document.body.setAttribute('data-theme', 'dark');
+        document.documentElement.setAttribute('data-theme', 'dark');
         localStorage.setItem('theme', 'dark');
         document.querySelector('.icon-moon').style.display = 'none';
         document.querySelector('.icon-sun').style.display = 'block';
