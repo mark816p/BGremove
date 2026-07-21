@@ -1,6 +1,8 @@
+import imglyRemoveBackground from 'https://esm.sh/@imgly/background-removal@1.4.5';
+
 // Configuration for @imgly/background-removal
 const config = {
-    publicPath: 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/' // use CDN for assets
+    publicPath: 'https://esm.sh/@imgly/background-removal@1.4.5/dist/' // use CDN for assets
 };
 
 // DOM Elements
@@ -161,7 +163,7 @@ const processQueue = async () => {
         const total = processedFiles.length + filesQueue.length + 1;
         const currentNum = processedFiles.length + 1;
         statusText.textContent = `Processing image ${currentNum} of ${total}: ${file.name}`;
-        progressBar.style.width = \`\${(currentNum / total) * 100}%\`;
+        progressBar.style.width = `${(currentNum / total) * 100}%`;
 
         // The core library process
         const originalUrl = URL.createObjectURL(file);
@@ -171,7 +173,8 @@ const processQueue = async () => {
             ...config,
             progress: (key, current, total) => {
                 const p = Math.round((current / total) * 100);
-                document.querySelector(\`#overlay-\${id} div:last-child\`).textContent = \`Downloading model: \${p}%\`;
+                const overlayText = document.querySelector(`#overlay-${id} div:last-child`);
+                if (overlayText) overlayText.textContent = `Downloading model: ${p}%`;
             }
         };
 
@@ -179,11 +182,11 @@ const processQueue = async () => {
         const resultUrl = URL.createObjectURL(imageBlob);
 
         // Update UI for success
-        const comparisonDiv = document.querySelector(\`#card-\${id} .image-comparison\`);
-        const overlay = document.getElementById(\`overlay-\${id}\`);
+        const comparisonDiv = document.querySelector(`#card-${id} .image-comparison`);
+        const overlay = document.getElementById(`overlay-${id}`);
         
         // Remove overlay
-        overlay.remove();
+        if (overlay) overlay.remove();
 
         // Create result image on top
         const resultImg = document.createElement('img');
@@ -193,7 +196,7 @@ const processQueue = async () => {
         comparisonDiv.appendChild(resultImg);
 
         // Enable download button
-        const downloadBtn = document.getElementById(\`download-\${id}\`);
+        const downloadBtn = document.getElementById(`download-${id}`);
         downloadBtn.disabled = false;
         
         const newFileName = file.name.replace(/\.[^/.]+$/, "") + "-no-bg.png";
@@ -216,7 +219,8 @@ const processQueue = async () => {
 
     } catch (error) {
         console.error("Error processing image:", error);
-        document.getElementById(\`overlay-\${id}\`).innerHTML = \`<div style="color: #ef4444;">Error processing</div>\`;
+        const overlay = document.getElementById(`overlay-${id}`);
+        if (overlay) overlay.innerHTML = `<div style="color: #ef4444;">Error processing</div>`;
     }
 
     // Process next
