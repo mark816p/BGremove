@@ -1,9 +1,8 @@
 import imglyRemoveBackground from 'https://esm.sh/@imgly/background-removal@1.4.5';
 
 // Configuration for @imgly/background-removal
-// Leaving publicPath empty allows the library to fetch the best compatible WASM/ONNX models from its default CDN automatically.
 const config = {
-    // publicPath omitted intentionally to prevent missing asset errors.
+    publicPath: 'https://unpkg.com/@imgly/background-removal-data@1.4.5/dist/'
 };
 
 // DOM Elements
