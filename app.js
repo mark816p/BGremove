@@ -1,8 +1,9 @@
 import imglyRemoveBackground from 'https://esm.sh/@imgly/background-removal@1.4.5';
 
 // Configuration for @imgly/background-removal
+// Leaving publicPath empty allows the library to fetch the best compatible WASM/ONNX models from its default CDN automatically.
 const config = {
-    publicPath: 'https://esm.sh/@imgly/background-removal@1.4.5/dist/' // use CDN for assets
+    // publicPath omitted intentionally to prevent missing asset errors.
 };
 
 // DOM Elements
@@ -55,6 +56,17 @@ themeToggleBtn.addEventListener('click', () => {
         document.querySelector('.icon-sun').style.display = 'block';
     }
 });
+
+// Hardware Spec Check
+const checkHardware = () => {
+    const cores = navigator.hardwareConcurrency || 4;
+    const memory = navigator.deviceMemory || 4;
+    
+    if (cores < 4 || memory < 4) {
+        document.getElementById('hardwareWarning').style.display = 'block';
+    }
+};
+checkHardware();
 
 // Drag and Drop Events
 dropZone.addEventListener('click', () => fileInput.click());
@@ -160,25 +172,32 @@ const processQueue = async () => {
 
     try {
         // Update status UI
-        const total = processedFiles.length + filesQueue.length + 1;
+        const totalImages = processedFiles.length + filesQueue.length + 1;
         const currentNum = processedFiles.length + 1;
-        statusText.textContent = `Processing image ${currentNum} of ${total}: ${file.name}`;
-        progressBar.style.width = `${(currentNum / total) * 100}%`;
+        statusText.textContent = `Processing image ${currentNum} of ${totalImages}: ${file.name}`;
+        progressBar.style.width = `0%`; // Reset bar for this image's specific progress
 
-        // The core library process
-        const originalUrl = URL.createObjectURL(file);
-        
-        // Configuration with progress callback
+        // Configuration with REAL progress callback
         const runConfig = {
             ...config,
             progress: (key, current, total) => {
-                const p = Math.round((current / total) * 100);
+                let p = 0;
+                if (key === 'compute:inference') {
+                    p = Math.round((current / total) * 100);
+                    statusText.textContent = `Processing image ${currentNum} of ${totalImages} (Inference: ${p}%)`;
+                } else if (key.startsWith('fetch:')) {
+                    p = Math.round((current / total) * 100);
+                    statusText.textContent = `Downloading AI models... ${p}%`;
+                }
+                progressBar.style.width = `${p}%`;
+                
                 const overlayText = document.querySelector(`#overlay-${id} div:last-child`);
-                if (overlayText) overlayText.textContent = `Downloading model: ${p}%`;
+                if (overlayText) overlayText.textContent = `${p}%`;
             }
         };
 
-        const imageBlob = await imglyRemoveBackground(originalUrl, runConfig);
+        // Pass the raw FILE object directly, NOT an Object URL, to prevent CORS/blob resolution issues
+        const imageBlob = await imglyRemoveBackground(file, runConfig);
         const resultUrl = URL.createObjectURL(imageBlob);
 
         // Update UI for success
