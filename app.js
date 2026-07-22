@@ -205,6 +205,8 @@ const processQueue = async () => {
         
         // Remove overlay
         if (overlay) overlay.remove();
+        
+        comparisonDiv.classList.add('processed');
 
         // Create result image on top
         const resultImg = document.createElement('img');

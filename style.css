@@ -318,10 +318,17 @@ body {
 }
 
 /* Simple Hover toggle for Before/After */
-.image-comparison:hover .img-result {
+.image-comparison.processed .img-original {
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.image-comparison.processed:hover .img-original {
+    opacity: 1;
+}
+.image-comparison.processed:hover .img-result {
     opacity: 0;
 }
-.image-comparison::after {
+.image-comparison.processed::after {
     content: 'Hover to see original';
     position: absolute;
     top: 8px;
@@ -336,7 +343,7 @@ body {
     opacity: 1;
     transition: opacity 0.2s;
 }
-.image-comparison:hover::after {
+.image-comparison.processed:hover::after {
     content: 'Original';
 }
 
