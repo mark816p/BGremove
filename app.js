@@ -28,9 +28,11 @@ const brushSizeInput = document.getElementById('brushSize');
 const brushToolsContainer = document.getElementById('brushToolsContainer');
 const btnNewImage = document.getElementById('btnNewImage');
 const btnDownload = document.getElementById('btnDownload');
+const magicEdgeToggle = document.getElementById('magicEdgeToggle');
 
 // State
-let originalImage = null; 
+let originalImage = null; // Stored as a downscaled Canvas if large
+let originalImageData = null; 
 let workingCanvas = document.createElement('canvas');
 let workingCtx = workingCanvas.getContext('2d');
 let brushCanvas = document.createElement('canvas');
@@ -125,25 +127,40 @@ const handleFile = (file) => {
 
     currentFileName = file.name;
     
-    // UI Transitions
     heroSection.style.display = 'none';
     dropZone.style.display = 'none';
     workspace.style.display = 'none';
     statusContainer.style.display = 'block';
     progressBar.style.width = '0%';
-    statusText.textContent = 'Initializing...';
+    statusText.textContent = 'Initializing image...';
 
     const objectUrl = URL.createObjectURL(file);
-    originalImage = new Image();
-    originalImage.onload = () => {
+    const img = new Image();
+    img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        processImage(file);
+        
+        // Downscale large images to prevent WebGL context loss/OOM during inference
+        const maxDim = 1600;
+        let scale = 1;
+        if (img.width > maxDim || img.height > maxDim) {
+            scale = maxDim / Math.max(img.width, img.height);
+        }
+        
+        originalImage = document.createElement('canvas');
+        originalImage.width = Math.floor(img.width * scale);
+        originalImage.height = Math.floor(img.height * scale);
+        const ctx = originalImage.getContext('2d');
+        ctx.drawImage(img, 0, 0, originalImage.width, originalImage.height);
+        
+        originalImage.toBlob((blob) => {
+            processImage(blob);
+        }, 'image/png');
     };
-    originalImage.src = objectUrl;
+    img.src = objectUrl;
 };
 
 // Background Removal Process
-const processImage = async (file) => {
+const processImage = async (blob) => {
     try {
         const runConfig = {
             ...config,
@@ -160,7 +177,7 @@ const processImage = async (file) => {
             }
         };
 
-        const resultBlob = await imglyRemoveBackground(file, runConfig);
+        const resultBlob = await imglyRemoveBackground(blob, runConfig);
         
         const resultUrl = URL.createObjectURL(resultBlob);
         const foregroundImg = new Image();
@@ -171,10 +188,10 @@ const processImage = async (file) => {
         foregroundImg.src = resultUrl;
     } catch (error) {
         console.error("Error processing image:", error);
-        statusText.textContent = "Error processing image. Please try another one.";
+        statusText.textContent = "Error processing image. The image might be too complex or your device ran out of memory. Try a smaller image.";
         setTimeout(() => {
             resetToUpload();
-        }, 3000);
+        }, 5000);
     }
 };
 
@@ -182,7 +199,6 @@ const setupCanvases = (foregroundImg) => {
     statusContainer.style.display = 'none';
     workspace.style.display = 'flex';
 
-    // Set internal canvas dimensions
     const w = originalImage.width;
     const h = originalImage.height;
     
@@ -193,11 +209,14 @@ const setupCanvases = (foregroundImg) => {
     brushCanvas.width = w;
     brushCanvas.height = h;
 
+    // Cache original image pixel data for Magic Edge tool
+    const tmpCtx = originalImage.getContext('2d', { willReadFrequently: true });
+    originalImageData = tmpCtx.getImageData(0, 0, w, h);
+
     // Initialize working canvas with the AI result
     workingCtx.clearRect(0, 0, w, h);
     workingCtx.drawImage(foregroundImg, 0, 0);
 
-    // Initial State
     setMode('removed');
     setTool('erase');
     updateBrushSize();
@@ -251,28 +270,32 @@ function setTool(tool) {
 function updateBrushSize() {
     if (!originalImage) return;
     const val = parseInt(brushSizeInput.value, 10);
-    const maxBrush = originalImage.width * 0.2; // max 20% of image width
-    const minBrush = originalImage.width * 0.005; // min 0.5%
+    const maxBrush = originalImage.width * 0.15; 
+    const minBrush = originalImage.width * 0.01; 
     brushSize = minBrush + (val / 100) * (maxBrush - minBrush);
-    
     updateCursorStyle();
 }
 
 function updateCursorStyle(e) {
     if (currentMode === 'original') return;
     
-    // Calculate scaled brush size for screen
     const rect = displayCanvas.getBoundingClientRect();
     const scale = rect.width / displayCanvas.width;
-    const cursorSize = brushSize * scale;
+    const cursorSize = brushSize * scale * 2; // radius to diameter
     
     brushCursor.style.width = `${cursorSize}px`;
     brushCursor.style.height = `${cursorSize}px`;
     
     if (e) {
         const wrapperRect = canvasWrapper.getBoundingClientRect();
-        brushCursor.style.left = `${e.clientX - wrapperRect.left}px`;
-        brushCursor.style.top = `${e.clientY - wrapperRect.top}px`;
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+        brushCursor.style.left = `${clientX - wrapperRect.left}px`;
+        brushCursor.style.top = `${clientY - wrapperRect.top}px`;
     }
 }
 
@@ -309,6 +332,67 @@ const stopDrawing = () => {
     isDrawing = false;
 };
 
+const applyMagicEdge = (centerX, centerY, radius, toolType) => {
+    if (!originalImageData) return;
+    
+    const startX = Math.floor(Math.max(0, centerX - radius));
+    const startY = Math.floor(Math.max(0, centerY - radius));
+    const endX = Math.ceil(Math.min(workingCanvas.width, centerX + radius));
+    const endY = Math.ceil(Math.min(workingCanvas.height, centerY + radius));
+    
+    const w = endX - startX;
+    const h = endY - startY;
+    if (w <= 0 || h <= 0) return;
+
+    const workingImgData = workingCtx.getImageData(startX, startY, w, h);
+    
+    const cX = Math.floor(centerX);
+    const cY = Math.floor(centerY);
+    
+    if (cX < 0 || cX >= originalImageData.width || cY < 0 || cY >= originalImageData.height) return;
+    
+    const centerIdx = (cY * originalImageData.width + cX) * 4;
+    const cr = originalImageData.data[centerIdx];
+    const cg = originalImageData.data[centerIdx+1];
+    const cb = originalImageData.data[centerIdx+2];
+
+    const rSq = radius * radius;
+    const tolerance = 60; // Configurable tolerance
+    
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const absX = startX + x;
+            const absY = startY + y;
+            const dx = absX - centerX;
+            const dy = absY - centerY;
+            
+            if (dx*dx + dy*dy <= rSq) {
+                const origIdx = (absY * originalImageData.width + absX) * 4;
+                const pr = originalImageData.data[origIdx];
+                const pg = originalImageData.data[origIdx+1];
+                const pb = originalImageData.data[origIdx+2];
+                const pa = originalImageData.data[origIdx+3];
+                
+                const colorDist = Math.abs(pr - cr) + Math.abs(pg - cg) + Math.abs(pb - cb);
+                
+                if (colorDist < tolerance) {
+                    const localIdx = (y * w + x) * 4;
+                    if (toolType === 'erase') {
+                        workingImgData.data[localIdx + 3] = 0;
+                    } else {
+                        workingImgData.data[localIdx] = pr;
+                        workingImgData.data[localIdx+1] = pg;
+                        workingImgData.data[localIdx+2] = pb;
+                        workingImgData.data[localIdx+3] = pa;
+                    }
+                }
+            }
+        }
+    }
+    
+    workingCtx.putImageData(workingImgData, startX, startY);
+};
+
 const draw = (e) => {
     updateCursorStyle(e);
     if (!isDrawing || currentMode === 'original') return;
@@ -316,35 +400,38 @@ const draw = (e) => {
     
     const curPos = getMousePos(e);
     
-    if (currentTool === 'erase') {
-        workingCtx.globalCompositeOperation = 'destination-out';
-        workingCtx.lineWidth = brushSize;
-        workingCtx.lineCap = 'round';
-        workingCtx.lineJoin = 'round';
-        workingCtx.beginPath();
-        workingCtx.moveTo(lastPos.x, lastPos.y);
-        workingCtx.lineTo(curPos.x, curPos.y);
-        workingCtx.stroke();
-    } else if (currentTool === 'restore') {
-        // Draw stroke on brush canvas
-        brushCtx.globalCompositeOperation = 'source-over';
-        brushCtx.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
-        
-        brushCtx.lineWidth = brushSize;
-        brushCtx.lineCap = 'round';
-        brushCtx.lineJoin = 'round';
-        brushCtx.beginPath();
-        brushCtx.moveTo(lastPos.x, lastPos.y);
-        brushCtx.lineTo(curPos.x, curPos.y);
-        brushCtx.stroke();
-        
-        // Fill stroke with original image pixels
-        brushCtx.globalCompositeOperation = 'source-in';
-        brushCtx.drawImage(originalImage, 0, 0);
-        
-        // Apply back to working canvas
-        workingCtx.globalCompositeOperation = 'source-over';
-        workingCtx.drawImage(brushCanvas, 0, 0);
+    if (magicEdgeToggle && magicEdgeToggle.checked) {
+        applyMagicEdge(curPos.x, curPos.y, brushSize, currentTool);
+    } else {
+        if (currentTool === 'erase') {
+            workingCtx.globalCompositeOperation = 'destination-out';
+            workingCtx.lineWidth = brushSize * 2;
+            workingCtx.lineCap = 'round';
+            workingCtx.lineJoin = 'round';
+            workingCtx.beginPath();
+            workingCtx.moveTo(lastPos.x, lastPos.y);
+            workingCtx.lineTo(curPos.x, curPos.y);
+            workingCtx.stroke();
+        } else if (currentTool === 'restore') {
+            brushCanvas.width = workingCanvas.width; 
+            brushCanvas.height = workingCanvas.height;
+            brushCtx.globalCompositeOperation = 'source-over';
+            brushCtx.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
+            
+            brushCtx.lineWidth = brushSize * 2;
+            brushCtx.lineCap = 'round';
+            brushCtx.lineJoin = 'round';
+            brushCtx.beginPath();
+            brushCtx.moveTo(lastPos.x, lastPos.y);
+            brushCtx.lineTo(curPos.x, curPos.y);
+            brushCtx.stroke();
+            
+            brushCtx.globalCompositeOperation = 'source-in';
+            brushCtx.drawImage(originalImage, 0, 0);
+            
+            workingCtx.globalCompositeOperation = 'source-over';
+            workingCtx.drawImage(brushCanvas, 0, 0);
+        }
     }
     
     lastPos = curPos;
