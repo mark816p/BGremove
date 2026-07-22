@@ -332,19 +332,8 @@ const stopDrawing = () => {
     isDrawing = false;
 };
 
-const applyMagicEdge = (centerX, centerY, radius, toolType) => {
+const applyMagicEdgeLocal = (centerX, centerY, radius, toolType, workingImgData, startX, startY, w, h) => {
     if (!originalImageData) return;
-    
-    const startX = Math.floor(Math.max(0, centerX - radius));
-    const startY = Math.floor(Math.max(0, centerY - radius));
-    const endX = Math.ceil(Math.min(workingCanvas.width, centerX + radius));
-    const endY = Math.ceil(Math.min(workingCanvas.height, centerY + radius));
-    
-    const w = endX - startX;
-    const h = endY - startY;
-    if (w <= 0 || h <= 0) return;
-
-    const workingImgData = workingCtx.getImageData(startX, startY, w, h);
     
     const cX = Math.floor(centerX);
     const cY = Math.floor(centerY);
@@ -357,12 +346,16 @@ const applyMagicEdge = (centerX, centerY, radius, toolType) => {
     const cb = originalImageData.data[centerIdx+2];
 
     const rSq = radius * radius;
-    const tolerance = 60; // Configurable tolerance
+    const tolerance = 60; 
     
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-            const absX = startX + x;
-            const absY = startY + y;
+    // Local bounding box for this specific circle
+    const localStartX = Math.max(startX, Math.floor(centerX - radius));
+    const localStartY = Math.max(startY, Math.floor(centerY - radius));
+    const localEndX = Math.min(startX + w, Math.ceil(centerX + radius));
+    const localEndY = Math.min(startY + h, Math.ceil(centerY + radius));
+    
+    for (let absY = localStartY; absY < localEndY; absY++) {
+        for (let absX = localStartX; absX < localEndX; absX++) {
             const dx = absX - centerX;
             const dy = absY - centerY;
             
@@ -376,7 +369,7 @@ const applyMagicEdge = (centerX, centerY, radius, toolType) => {
                 const colorDist = Math.abs(pr - cr) + Math.abs(pg - cg) + Math.abs(pb - cb);
                 
                 if (colorDist < tolerance) {
-                    const localIdx = (y * w + x) * 4;
+                    const localIdx = ((absY - startY) * w + (absX - startX)) * 4;
                     if (toolType === 'erase') {
                         workingImgData.data[localIdx + 3] = 0;
                     } else {
@@ -389,8 +382,6 @@ const applyMagicEdge = (centerX, centerY, radius, toolType) => {
             }
         }
     }
-    
-    workingCtx.putImageData(workingImgData, startX, startY);
 };
 
 const draw = (e) => {
@@ -401,7 +392,37 @@ const draw = (e) => {
     const curPos = getMousePos(e);
     
     if (magicEdgeToggle && magicEdgeToggle.checked) {
-        applyMagicEdge(curPos.x, curPos.y, brushSize, currentTool);
+        // Find bounding box for the entire stroke segment
+        const minX = Math.min(lastPos.x, curPos.x);
+        const maxX = Math.max(lastPos.x, curPos.x);
+        const minY = Math.min(lastPos.y, curPos.y);
+        const maxY = Math.max(lastPos.y, curPos.y);
+
+        const startX = Math.floor(Math.max(0, minX - brushSize));
+        const startY = Math.floor(Math.max(0, minY - brushSize));
+        const endX = Math.ceil(Math.min(workingCanvas.width, maxX + brushSize));
+        const endY = Math.ceil(Math.min(workingCanvas.height, maxY + brushSize));
+
+        const w = endX - startX;
+        const h = endY - startY;
+
+        if (w > 0 && h > 0) {
+            const workingImgData = workingCtx.getImageData(startX, startY, w, h);
+            
+            const dx = curPos.x - lastPos.x;
+            const dy = curPos.y - lastPos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const step = Math.max(1, brushSize / 4); 
+            const steps = Math.max(1, Math.floor(dist / step));
+            
+            for (let i = 1; i <= steps; i++) {
+                const ix = lastPos.x + dx * (i / steps);
+                const iy = lastPos.y + dy * (i / steps);
+                applyMagicEdgeLocal(ix, iy, brushSize, currentTool, workingImgData, startX, startY, w, h);
+            }
+            
+            workingCtx.putImageData(workingImgData, startX, startY);
+        }
     } else {
         if (currentTool === 'erase') {
             workingCtx.globalCompositeOperation = 'destination-out';
