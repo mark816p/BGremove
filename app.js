@@ -490,12 +490,42 @@ canvasWrapper.addEventListener('touchcancel', stopDrawing);
 // Download Logic
 btnDownload.addEventListener('click', () => {
     const newFileName = currentFileName.replace(/\.[^/.]+$/, "") + "-no-bg.png";
-    const dataUrl = workingCanvas.toDataURL('image/png');
     
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = newFileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    workingCanvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = newFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 100); // Give browser time to start download
+    }, 'image/png');
+});
+
+// Keyboard Shortcuts
+window.addEventListener('keydown', (e) => {
+    if (workspace.style.display === 'none') return; // Only active when editing
+    
+    switch (e.key.toLowerCase()) {
+        case 'e':
+            setTool('erase');
+            break;
+        case 'r':
+            setTool('restore');
+            break;
+        case 'm':
+            if (magicEdgeToggle) {
+                magicEdgeToggle.checked = !magicEdgeToggle.checked;
+            }
+            break;
+        case '[':
+            brushSizeInput.value = Math.max(parseInt(brushSizeInput.min, 10), parseInt(brushSizeInput.value, 10) - 5);
+            updateBrushSize();
+            break;
+        case ']':
+            brushSizeInput.value = Math.min(parseInt(brushSizeInput.max, 10), parseInt(brushSizeInput.value, 10) + 5);
+            updateBrushSize();
+            break;
+    }
 });
