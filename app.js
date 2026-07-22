@@ -141,52 +141,38 @@ const handleFile = (file) => {
     workspace.style.display = 'none';
     statusContainer.style.display = 'block';
     progressBar.style.width = '0%';
+    progressBar.classList.remove('indeterminate');
     statusText.textContent = 'Initializing image...';
 
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        
-        // Downscale large images to prevent WebGL context loss/OOM during inference
-        const maxDim = 1600;
-        let scale = 1;
-        if (img.width > maxDim || img.height > maxDim) {
-            scale = maxDim / Math.max(img.width, img.height);
-        }
-        
-        originalImage = document.createElement('canvas');
-        originalImage.width = Math.floor(img.width * scale);
-        originalImage.height = Math.floor(img.height * scale);
-        const ctx = originalImage.getContext('2d');
-        ctx.drawImage(img, 0, 0, originalImage.width, originalImage.height);
-        
-        originalImage.toBlob((blob) => {
-            processImage(blob);
-        }, 'image/png');
+        originalImage = img; // Store full resolution original
+        processImage(file);
     };
     img.src = objectUrl;
 };
 
 // Background Removal Process
-const processImage = async (blob) => {
+const processImage = async (file) => {
     try {
         const runConfig = {
             ...config,
             progress: (key, current, total) => {
-                let p = 0;
-                if (key === 'compute:inference') {
-                    p = Math.round((current / total) * 100);
-                    statusText.textContent = `Removing background: ${p}%`;
-                } else if (key.startsWith('fetch:')) {
-                    p = Math.round((current / total) * 100);
+                if (key.startsWith('fetch:')) {
+                    const p = Math.round((current / total) * 100);
                     statusText.textContent = `Downloading AI models: ${p}%`;
+                    progressBar.style.width = `${p}%`;
+                } else if (key === 'compute:inference') {
+                    statusText.textContent = `Removing background (This may take a moment)...`;
+                    progressBar.style.width = '100%';
+                    progressBar.classList.add('indeterminate');
                 }
-                progressBar.style.width = `${p}%`;
             }
         };
 
-        const resultBlob = await imglyRemoveBackground(blob, runConfig);
+        const resultBlob = await imglyRemoveBackground(file, runConfig);
         
         const resultUrl = URL.createObjectURL(resultBlob);
         const foregroundImg = new Image();
@@ -219,7 +205,11 @@ const setupCanvases = (foregroundImg) => {
     brushCanvas.height = h;
 
     // Cache original image pixel data for Magic Edge tool
-    const tmpCtx = originalImage.getContext('2d', { willReadFrequently: true });
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = w;
+    tmpCanvas.height = h;
+    const tmpCtx = tmpCanvas.getContext('2d', { willReadFrequently: true });
+    tmpCtx.drawImage(originalImage, 0, 0);
     originalImageData = tmpCtx.getImageData(0, 0, w, h);
 
     // Initialize working canvas with the AI result
