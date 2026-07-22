@@ -39,8 +39,38 @@ let brushCanvas = document.createElement('canvas');
 let brushCtx = brushCanvas.getContext('2d');
 let displayCtx = displayCanvas.getContext('2d');
 
-let currentFileName = '';
+let currentFileName = "image.png";
+
+let samWorker = null;
+let samReady = false;
+let samEmbedReady = false;
+
+if (window.Worker) {
+    samWorker = new Worker('sam-worker.js', { type: 'module' });
+    samWorker.onmessage = (e) => {
+        const data = e.data;
+        if (data.type === 'status' || data.type === 'progress') {
+            samStatus.textContent = data.message || `(Loading: ${Math.round(data.progress * 100)}%)`;
+        } else if (data.type === 'ready') {
+            samReady = true;
+            samStatus.textContent = '';
+        } else if (data.type === 'embed_ready') {
+            samEmbedReady = true;
+            samStatus.textContent = '';
+        } else if (data.type === 'segment_result') {
+            applySamMask(data.mask, data.width, data.height);
+        } else if (data.type === 'error') {
+            console.error('SAM Error:', data.error);
+            samStatus.textContent = '(Error)';
+        }
+    };
+    samWorker.postMessage({ type: 'init' });
+}
+
 let isDrawing = false;
+let lastX = 0;
+let lastY = 0;
+let samPending = false;
 let currentTool = 'erase'; 
 let currentMode = 'removed'; 
 let brushSize = 50;
@@ -191,9 +221,6 @@ const processImage = async (file) => {
 };
 
 const setupCanvases = (foregroundImg) => {
-    statusContainer.style.display = 'none';
-    workspace.style.display = 'flex';
-
     const w = originalImage.width;
     const h = originalImage.height;
     
@@ -216,10 +243,21 @@ const setupCanvases = (foregroundImg) => {
     workingCtx.clearRect(0, 0, w, h);
     workingCtx.drawImage(foregroundImg, 0, 0);
 
+    renderDisplay();
+
+    statusContainer.style.display = 'none';
+    workspace.style.display = 'flex';
+    
+    // Send original image data to SAM worker for embedding
+    if (samWorker) {
+        samEmbedReady = false;
+        samStatus.textContent = '(Preparing Magic Brush...)';
+        samWorker.postMessage({ type: 'embed', image: originalImageData });
+    }
+    
     setMode('removed');
     setTool('erase');
     updateBrushSize();
-    renderDisplay();
 };
 
 const resetToUpload = () => {
@@ -299,8 +337,6 @@ function updateCursorStyle(e) {
 }
 
 // Canvas Interaction Logic
-let lastPos = {x: 0, y: 0};
-
 function getMousePos(e) {
     const rect = displayCanvas.getBoundingClientRect();
     const scaleX = displayCanvas.width / rect.width;
@@ -322,8 +358,22 @@ function getMousePos(e) {
 
 const startDrawing = (e) => {
     if (currentMode === 'original') return;
+    
+    const pos = getMousePos(e);
+    
+    if (magicEdgeToggle && magicEdgeToggle.checked) {
+        if (samEmbedReady && !samPending) {
+            samPending = true;
+            samStatus.textContent = '(Processing...)';
+            // Send exact image coordinates to SAM
+            samWorker.postMessage({ type: 'segment', point: { x: Math.floor(pos.x), y: Math.floor(pos.y) } });
+        }
+        return; // Skip normal drawing
+    }
+    
     isDrawing = true;
-    lastPos = getMousePos(e);
+    lastX = pos.x;
+    lastY = pos.y;
     draw(e);
 };
 
@@ -331,132 +381,74 @@ const stopDrawing = () => {
     isDrawing = false;
 };
 
-const applyMagicEdgeLocal = (centerX, centerY, radius, toolType, workingImgData, startX, startY, w, h) => {
-    if (!originalImageData) return;
-    
-    const cX = Math.floor(centerX);
-    const cY = Math.floor(centerY);
-    
-    if (cX < 0 || cX >= originalImageData.width || cY < 0 || cY >= originalImageData.height) return;
-    
-    const centerIdx = (cY * originalImageData.width + cX) * 4;
-    const cr = originalImageData.data[centerIdx];
-    const cg = originalImageData.data[centerIdx+1];
-    const cb = originalImageData.data[centerIdx+2];
-
-    const rSq = radius * radius;
-    const tolerance = 60; 
-    
-    // Local bounding box for this specific circle
-    const localStartX = Math.max(startX, Math.floor(centerX - radius));
-    const localStartY = Math.max(startY, Math.floor(centerY - radius));
-    const localEndX = Math.min(startX + w, Math.ceil(centerX + radius));
-    const localEndY = Math.min(startY + h, Math.ceil(centerY + radius));
-    
-    for (let absY = localStartY; absY < localEndY; absY++) {
-        for (let absX = localStartX; absX < localEndX; absX++) {
-            const dx = absX - centerX;
-            const dy = absY - centerY;
-            
-            if (dx*dx + dy*dy <= rSq) {
-                const origIdx = (absY * originalImageData.width + absX) * 4;
-                const pr = originalImageData.data[origIdx];
-                const pg = originalImageData.data[origIdx+1];
-                const pb = originalImageData.data[origIdx+2];
-                const pa = originalImageData.data[origIdx+3];
-                
-                const colorDist = Math.abs(pr - cr) + Math.abs(pg - cg) + Math.abs(pb - cb);
-                
-                if (colorDist < tolerance) {
-                    const localIdx = ((absY - startY) * w + (absX - startX)) * 4;
-                    if (toolType === 'erase') {
-                        workingImgData.data[localIdx + 3] = 0;
-                    } else {
-                        workingImgData.data[localIdx] = pr;
-                        workingImgData.data[localIdx+1] = pg;
-                        workingImgData.data[localIdx+2] = pb;
-                        workingImgData.data[localIdx+3] = pa;
-                    }
-                }
-            }
-        }
-    }
-};
-
 const draw = (e) => {
     updateCursorStyle(e);
     if (!isDrawing || currentMode === 'original') return;
     e.preventDefault(); 
     
+    if (magicEdgeToggle && magicEdgeToggle.checked) return; // Skip normal drawing in AI mode
+    
     const curPos = getMousePos(e);
     
-    if (magicEdgeToggle && magicEdgeToggle.checked) {
-        // Find bounding box for the entire stroke segment
-        const minX = Math.min(lastPos.x, curPos.x);
-        const maxX = Math.max(lastPos.x, curPos.x);
-        const minY = Math.min(lastPos.y, curPos.y);
-        const maxY = Math.max(lastPos.y, curPos.y);
-
-        const startX = Math.floor(Math.max(0, minX - brushSize));
-        const startY = Math.floor(Math.max(0, minY - brushSize));
-        const endX = Math.ceil(Math.min(workingCanvas.width, maxX + brushSize));
-        const endY = Math.ceil(Math.min(workingCanvas.height, maxY + brushSize));
-
-        const w = endX - startX;
-        const h = endY - startY;
-
-        if (w > 0 && h > 0) {
-            const workingImgData = workingCtx.getImageData(startX, startY, w, h);
-            
-            const dx = curPos.x - lastPos.x;
-            const dy = curPos.y - lastPos.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            const step = Math.max(1, brushSize / 4); 
-            const steps = Math.max(1, Math.floor(dist / step));
-            
-            for (let i = 1; i <= steps; i++) {
-                const ix = lastPos.x + dx * (i / steps);
-                const iy = lastPos.y + dy * (i / steps);
-                applyMagicEdgeLocal(ix, iy, brushSize, currentTool, workingImgData, startX, startY, w, h);
-            }
-            
-            workingCtx.putImageData(workingImgData, startX, startY);
-        }
-    } else {
-        if (currentTool === 'erase') {
-            workingCtx.globalCompositeOperation = 'destination-out';
-            workingCtx.lineWidth = brushSize * 2;
-            workingCtx.lineCap = 'round';
-            workingCtx.lineJoin = 'round';
-            workingCtx.beginPath();
-            workingCtx.moveTo(lastPos.x, lastPos.y);
-            workingCtx.lineTo(curPos.x, curPos.y);
-            workingCtx.stroke();
-        } else if (currentTool === 'restore') {
-            brushCanvas.width = workingCanvas.width; 
-            brushCanvas.height = workingCanvas.height;
-            brushCtx.globalCompositeOperation = 'source-over';
-            brushCtx.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
-            
-            brushCtx.lineWidth = brushSize * 2;
-            brushCtx.lineCap = 'round';
-            brushCtx.lineJoin = 'round';
-            brushCtx.beginPath();
-            brushCtx.moveTo(lastPos.x, lastPos.y);
-            brushCtx.lineTo(curPos.x, curPos.y);
-            brushCtx.stroke();
-            
-            brushCtx.globalCompositeOperation = 'source-in';
-            brushCtx.drawImage(originalImage, 0, 0);
-            
-            workingCtx.globalCompositeOperation = 'source-over';
-            workingCtx.drawImage(brushCanvas, 0, 0);
-        }
+    // Normal Brush Logic
+    if (currentTool === 'erase') {
+        workingCtx.globalCompositeOperation = 'destination-out';
+        workingCtx.lineWidth = brushSize * 2;
+        workingCtx.lineCap = 'round';
+        workingCtx.lineJoin = 'round';
+        workingCtx.beginPath();
+        workingCtx.moveTo(lastX, lastY);
+        workingCtx.lineTo(curPos.x, curPos.y);
+        workingCtx.stroke();
+    } else if (currentTool === 'restore') {
+        brushCanvas.width = workingCanvas.width; 
+        brushCanvas.height = workingCanvas.height;
+        brushCtx.globalCompositeOperation = 'source-over';
+        brushCtx.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
+        
+        brushCtx.lineWidth = brushSize * 2;
+        brushCtx.lineCap = 'round';
+        brushCtx.lineJoin = 'round';
+        brushCtx.beginPath();
+        brushCtx.moveTo(lastX, lastY);
+        brushCtx.lineTo(curPos.x, curPos.y);
+        brushCtx.stroke();
+        
+        brushCtx.globalCompositeOperation = 'source-in';
+        brushCtx.drawImage(originalImage, 0, 0);
+        
+        workingCtx.globalCompositeOperation = 'source-over';
+        workingCtx.drawImage(brushCanvas, 0, 0);
     }
     
-    lastPos = curPos;
+    lastX = curPos.x;
+    lastY = curPos.y;
     renderDisplay();
 };
+
+function applySamMask(maskData, width, height) {
+    samPending = false;
+    samStatus.textContent = '';
+    
+    const workingImageData = workingCtx.getImageData(0, 0, width, height);
+    const wData = workingImageData.data;
+    
+    for (let i = 0; i < maskData.length; i++) {
+        if (maskData[i] > 0) { // Logit > 0 means foreground
+            const pixelIdx = i * 4;
+            if (currentTool === 'erase') {
+                wData[pixelIdx + 3] = 0;
+            } else {
+                wData[pixelIdx] = originalImageData.data[pixelIdx];
+                wData[pixelIdx + 1] = originalImageData.data[pixelIdx + 1];
+                wData[pixelIdx + 2] = originalImageData.data[pixelIdx + 2];
+                wData[pixelIdx + 3] = originalImageData.data[pixelIdx + 3];
+            }
+        }
+    }
+    workingCtx.putImageData(workingImageData, 0, 0);
+    renderDisplay();
+}
 
 function renderDisplay() {
     displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);

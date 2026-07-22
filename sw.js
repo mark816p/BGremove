@@ -1,11 +1,12 @@
-const CACHE_NAME = 'bg-remover-cache-v1';
+const CACHE_NAME = 'bg-remover-cache-v2';
 
 const APP_SHELL = [
     './',
     './index.html',
     './style.css',
     './app.js',
-    './favicon.svg'
+    './favicon.svg',
+    './sam-worker.js'
 ];
 
 self.addEventListener('install', event => {
