@@ -70,7 +70,7 @@
             </div>
 
             <!-- Drag & Drop Zone -->
-            <input type="file" id="fileInput" multiple accept="image/png, image/jpeg, image/webp" hidden>
+            <input type="file" id="fileInput" accept="image/png, image/jpeg, image/webp" hidden>
             <div class="upload-zone" id="dropZone">
                 <div class="upload-content">
                     <div class="upload-icon-wrapper">
@@ -93,18 +93,45 @@
                 <p class="status-text" id="statusText">Processing models...</p>
             </div>
 
-            <!-- Actions Bar (Shows when files are processed) -->
-            <div class="actions-bar" id="actionsBar" style="display: none;">
-                <h2 class="results-title">Results (<span id="processedCount">0</span>/<span id="totalCount">0</span>)</h2>
-                <button class="btn btn-primary" id="downloadAllBtn" disabled>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                    Download All as ZIP
-                </button>
-            </div>
+            <!-- Workspace -->
+            <div id="workspace" style="display: none;">
+                <!-- Toolbar -->
+                <div class="workspace-toolbar">
+                    <div class="tabs">
+                        <button class="tab-btn active" id="tabRemoved">Removed Background</button>
+                        <button class="tab-btn" id="tabOriginal">Original</button>
+                    </div>
+                    
+                    <div class="brush-tools" id="brushToolsContainer" style="display: none;">
+                        <button class="tool-btn active" id="btnErase" title="Erase">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+                            Erase
+                        </button>
+                        <button class="tool-btn" id="btnRestore" title="Restore">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+                            Restore
+                        </button>
+                        <div class="brush-size-wrapper">
+                            <label for="brushSize">Size</label>
+                            <input type="range" id="brushSize" min="1" max="100" value="30">
+                        </div>
+                    </div>
+                </div>
 
-            <!-- Results Gallery -->
-            <div class="gallery" id="gallery">
-                <!-- Image items will be injected here -->
+                <!-- Canvas Display -->
+                <div class="canvas-wrapper transparent-bg" id="canvasWrapper">
+                    <canvas id="displayCanvas"></canvas>
+                    <div id="brushCursor" class="brush-cursor"></div>
+                </div>
+
+                <!-- Actions -->
+                <div class="workspace-actions">
+                    <button class="btn btn-secondary" id="btnNewImage">Upload New Image</button>
+                    <button class="btn btn-primary" id="btnDownload">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                        Download Image
+                    </button>
+                </div>
             </div>
         </main>
         
